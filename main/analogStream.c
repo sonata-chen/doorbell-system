@@ -98,6 +98,7 @@ static int _a_read(audio_element_handle_t self, char *buffer, int len, TickType_
         }
         buffer[i] = evt.sample;
         print_timer_counter(evt.timer_counter_value);
+        printf("%u", evt.sample);
     }
 
     return len;
