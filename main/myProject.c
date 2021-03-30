@@ -33,6 +33,8 @@
 #include "periph_wifi.h"
 #include "raw_stream.h"
 
+#include "analogStream.h"
+
 #if __has_include("esp_idf_version.h")
 #include "esp_idf_version.h"
 #else
@@ -48,7 +50,7 @@
 static const char *TAG = "VOIP_EXAMPLE";
 
 #define I2S_SAMPLE_RATE 16000
-#define I2S_CHANNELS 2
+#define I2S_CHANNELS 1
 #define I2S_BITS 16
 
 #define CODEC_SAMPLE_RATE 8000
@@ -65,6 +67,7 @@ static esp_err_t recorder_pipeline_open()
     recorder = audio_pipeline_init(&pipeline_cfg);
     AUDIO_NULL_CHECK(TAG, recorder, return ESP_FAIL);
 
+    /*
     i2s_stream_cfg_t i2s_cfg = I2S_STREAM_CFG_DEFAULT();
     i2s_cfg.type = AUDIO_STREAM_READER;
     i2s_cfg.uninstall_drv = false;
@@ -74,6 +77,9 @@ static esp_err_t recorder_pipeline_open()
 #endif
     i2s_cfg.i2s_config.sample_rate = I2S_SAMPLE_RATE;
     i2s_stream_reader = i2s_stream_init(&i2s_cfg);
+    */
+
+    audio_element_handle_t a_stream = analog_stream_init();
 
 #if defined CONFIG_ESP_LYRAT_MINI_V1_1_BOARD
     algorithm_stream_cfg_t algo_config = ALGORITHM_STREAM_CFG_DEFAULT();
@@ -104,7 +110,9 @@ static esp_err_t recorder_pipeline_open()
     raw_read = raw_stream_init(&raw_cfg);
     audio_element_set_output_timeout(raw_read, portMAX_DELAY);
 
-    audio_pipeline_register(recorder, i2s_stream_reader, "i2s");
+    // audio_pipeline_register(recorder, i2s_stream_reader, "i2s");
+
+    audio_pipeline_register(recorder, a_stream, "as");
     audio_pipeline_register(recorder, filter, "filter");
     audio_pipeline_register(recorder, sip_encoder, "sip_enc");
     audio_pipeline_register(recorder, raw_read, "raw");
@@ -146,7 +154,7 @@ static esp_err_t player_pipeline_open()
     rsp_cfg.complexity = 5;
     audio_element_handle_t filter = rsp_filter_init(&rsp_cfg);
 
-    i2s_stream_cfg_t i2s_cfg = I2S_STREAM_CFG_DEFAULT();
+    i2s_stream_cfg_t i2s_cfg = I2S_STREAM_INTERNAL_DAC_CFG_DEFAULT();
     i2s_cfg.type = AUDIO_STREAM_WRITER;
     i2s_cfg.uninstall_drv = false;
     i2s_cfg.i2s_config.sample_rate = I2S_SAMPLE_RATE;
