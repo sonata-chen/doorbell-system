@@ -1,5 +1,3 @@
-#include <stdio.h>
-
 #include "driver/adc.h"
 #include "driver/timer.h"
 #include "driver/periph_ctrl.h"
@@ -8,7 +6,7 @@
 #include "freertos/queue.h"
 
 
-#define TIMER_DIVIDER 16                              //  Hardware timer clock divider
+#define TIMER_DIVIDER 2                              //  Hardware timer clock divider
 #define TIMER_SCALE (TIMER_BASE_CLK / TIMER_DIVIDER)  // convert counter value to seconds
 #define TIMER_INTERVAL0_SEC (3.4179)                  // sample test interval for the first timer
 #define TIMER_INTERVAL1_SEC (5.78)                    // sample test interval for the second timer
@@ -19,11 +17,11 @@
  * from the timer interrupt handler to the main program.
  */
 typedef struct {
-    int type;  // the type of timer's event
-    int timer_group;
-    int timer_idx;
-    uint64_t timer_counter_value;
-    int sample;
+    // int type;  // the type of timer's event
+    // int timer_group;
+    // int timer_idx;
+    // uint64_t timer_counter_value;
+    int16_t sample;
 } timer_event_t;
 
 typedef struct recorder {

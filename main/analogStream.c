@@ -1,5 +1,3 @@
-#include "analogStream.h"
-
 #include "audio_common.h"
 #include "audio_element.h"
 #include "audio_error.h"
@@ -7,13 +5,16 @@
 #include "driver/timer.h"
 #include "esp_err.h"
 #include "esp_log.h"
+
+/**/
+#include "analogStream.h"
 #include "recorder.h"
 
 #define A_STREAM_TASK_STACK (3072 + 512)
 #define A_STREAM_BUF_SIZE (2048)
 #define A_STREAM_TASK_PRIO (23)
 #define A_STREAM_TASK_CORE (0)
-#define A_STREAM_RINGBUFFER_SIZE (8 * 1024)
+#define A_STREAM_RINGBUFFER_SIZE (2 * 1024)
 
 static const char *TAG = "A_STREAM";
 
@@ -66,10 +67,10 @@ audio_element_handle_t analog_stream_init()
     AUDIO_MEM_CHECK(TAG, el, {
         return NULL;
     });
-    Recorder *recorder = newRecorder(16000, ADC_CHANNEL_6, ADC_WIDTH_BIT_9, TIMER_0);
+    Recorder *recorder = newRecorder(16000, ADC_CHANNEL_5, ADC_WIDTH_BIT_12, TIMER_0);
     audio_element_setdata(el, recorder);
 
-    audio_element_set_music_info(el, 16000, 1, 9);
+    audio_element_set_music_info(el, 16000, 1, 12);
 
     return el;
 }
@@ -90,15 +91,19 @@ static int _a_read(audio_element_handle_t self, char *buffer, int len, TickType_
 
     timer_event_t evt;
     int i;
-    for (i = 0; i > len; i++) {
+    for (i = 0; i < len; i += 2) {
         BaseType_t ret = xQueueReceive(r->sample_queue, &evt, portMAX_DELAY);
 
         while (ret != pdTRUE) {
             ret = xQueueReceive(r->sample_queue, &evt, portMAX_DELAY);
         }
-        buffer[i] = evt.sample;
-        print_timer_counter(evt.timer_counter_value);
-        printf("%u", evt.sample);
+
+        int width = r->width + 9;
+        int16_t sample_16_bits = evt.sample * (1 << (16 - width)) - (1 << (16 - 1));
+        int8_t higher_byte = sample_16_bits >> 8;
+        int8_t lower_byte = sample_16_bits;
+        buffer[i + 1] = higher_byte;
+        buffer[i + 0] = lower_byte;
     }
 
     return len;

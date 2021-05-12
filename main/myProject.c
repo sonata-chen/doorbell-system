@@ -9,6 +9,9 @@
 
 #include <string.h>
 
+#include "freertos/FreeRTOS.h"
+
+/**/
 #include "algorithm_stream.h"
 #include "audio_common.h"
 #include "audio_element.h"
@@ -22,7 +25,6 @@
 #include "esp_system.h"
 #include "esp_wifi.h"
 #include "filter_resample.h"
-#include "freertos/FreeRTOS.h"
 #include "freertos/event_groups.h"
 #include "freertos/task.h"
 #include "g711_decoder.h"
@@ -33,7 +35,9 @@
 #include "periph_wifi.h"
 #include "raw_stream.h"
 
+/**/
 #include "analogStream.h"
+#include "recorder.h"
 
 #if __has_include("esp_idf_version.h")
 #include "esp_idf_version.h"
@@ -62,7 +66,7 @@ static audio_pipeline_handle_t recorder, player;
 
 static esp_err_t recorder_pipeline_open()
 {
-    audio_element_handle_t i2s_stream_reader;
+    // audio_element_handle_t i2s_stream_reader;
     audio_pipeline_cfg_t pipeline_cfg = DEFAULT_AUDIO_PIPELINE_CONFIG();
     recorder = audio_pipeline_init(&pipeline_cfg);
     AUDIO_NULL_CHECK(TAG, recorder, return ESP_FAIL);
@@ -103,6 +107,7 @@ static esp_err_t recorder_pipeline_open()
 
     g711_encoder_cfg_t g711_cfg = DEFAULT_G711_ENCODER_CONFIG();
     g711_cfg.task_core = 1;
+    g711_cfg.enc_mode = 1;
     audio_element_handle_t sip_encoder = g711_encoder_init(&g711_cfg);
 
     raw_stream_cfg_t raw_cfg = RAW_STREAM_CFG_DEFAULT();
@@ -123,7 +128,7 @@ static esp_err_t recorder_pipeline_open()
     const char *link_tag[5] = {"i2s", "algo", "filter", "sip_enc", "raw"};
     audio_pipeline_link(recorder, &link_tag[0], 5);
 #else
-    const char *link_tag[4] = {"i2s", "filter", "sip_enc", "raw"};
+    const char *link_tag[4] = {"as", "filter", "sip_enc", "raw"};
     audio_pipeline_link(recorder, &link_tag[0], 4);
 #endif
 
@@ -293,9 +298,9 @@ static esp_err_t input_key_service_cb(periph_service_handle_t handle, periph_ser
 
 void app_main()
 {
-    const char *WIFI_SSID = "Billy";
-    const char *WIFI_PASSWORD = "ch221904";
-    const char *SIP_URI = "192.168.0.12";
+    const char *WIFI_SSID = "test";
+    const char *WIFI_PASSWORD = "00000000";
+    const char *SIP_URI = "udp://100:100@192.168.7.1:5060";
 
     esp_log_level_set("*", ESP_LOG_INFO);
     esp_log_level_set(TAG, ESP_LOG_INFO);
@@ -320,7 +325,11 @@ void app_main()
     esp_periph_set_handle_t set = esp_periph_set_init(&periph_cfg);
 
     ESP_LOGI(TAG, "[1.1] Initialize and start peripherals");
-    audio_board_key_init(set);
+    // audio_board_key_init(set);
+
+    gpio_set_direction(2, GPIO_MODE_OUTPUT);
+    adc1_config_width(ADC_WIDTH_BIT_12);
+    adc1_config_channel_atten(ADC1_CHANNEL_5, ADC_ATTEN_DB_6);
 
     ESP_LOGI(TAG, "[1.2] Start and wait for Wi-Fi network");
     periph_wifi_cfg_t wifi_cfg = {
@@ -331,17 +340,17 @@ void app_main()
     esp_periph_start(set, wifi_handle);
     periph_wifi_wait_for_connected(wifi_handle, portMAX_DELAY);
 
-    ESP_LOGI(TAG, "[ 2 ] Start codec chip");
-    audio_board_handle_t board_handle = audio_board_init();
-    audio_hal_ctrl_codec(board_handle->audio_hal, AUDIO_HAL_CODEC_MODE_BOTH, AUDIO_HAL_CTRL_START);
-
-    ESP_LOGI(TAG, "[ 3 ] Create and start input key service");
-    input_key_service_info_t input_key_info[] = INPUT_KEY_DEFAULT_INFO();
-    input_key_service_cfg_t input_cfg = INPUT_KEY_SERVICE_DEFAULT_CONFIG();
-    input_cfg.handle = set;
-    periph_service_handle_t input_ser = input_key_service_create(&input_cfg);
-    input_key_service_add_key(input_ser, input_key_info, INPUT_KEY_NUM);
-    periph_service_set_callback(input_ser, input_key_service_cb, (void *)board_handle);
+    // ESP_LOGI(TAG, "[ 2 ] Start codec chip");
+    // audio_board_handle_t board_handle = audio_board_init();
+    // audio_hal_ctrl_codec(board_handle->audio_hal, AUDIO_HAL_CODEC_MODE_BOTH, AUDIO_HAL_CTRL_START);
+    //
+    // ESP_LOGI(TAG, "[ 3 ] Create and start input key service");
+    // input_key_service_info_t input_key_info[] = INPUT_KEY_DEFAULT_INFO();
+    // input_key_service_cfg_t input_cfg = INPUT_KEY_SERVICE_DEFAULT_CONFIG();
+    // input_cfg.handle = set;
+    // periph_service_handle_t input_ser = input_key_service_create(&input_cfg);
+    // input_key_service_add_key(input_ser, input_key_info, INPUT_KEY_NUM);
+    // periph_service_set_callback(input_ser, input_key_service_cb, (void *)board_handle);
 
     ESP_LOGI(TAG, "[ 4 ] Create SIP Service");
     sip_config_t sip_cfg = {
@@ -356,4 +365,14 @@ void app_main()
     };
     sip = esp_sip_init(&sip_cfg);
     esp_sip_start(sip);
+    while (true) {
+        sip_state_t sip_state = esp_sip_get_state(sip);
+
+        if (!(sip_state < SIP_STATE_REGISTERED)) {
+            if (sip_state & SIP_STATE_RINGING) {
+                esp_sip_uas_answer(sip, true);
+                break;
+            }
+        }
+    }
 }
