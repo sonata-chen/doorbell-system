@@ -1,14 +1,3 @@
-/* VoIP Example
-
-   This example code is in the Public Domain (or CC0 licensed, at your option.)
-
-   Unless required by applicable law or agreed to in writing, this
-   software is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR
-   CONDITIONS OF ANY KIND, either express or implied.
-*/
-
-#include <string.h>
-
 #include "freertos/FreeRTOS.h"
 
 /**/
@@ -53,13 +42,6 @@
 
 static const char *TAG = "VOIP_EXAMPLE";
 
-#define I2S_SAMPLE_RATE 16000
-#define I2S_CHANNELS 1
-#define I2S_BITS 16
-
-#define CODEC_SAMPLE_RATE 8000
-#define CODEC_CHANNELS 1
-
 static sip_handle_t sip;
 static audio_element_handle_t raw_read, raw_write;
 static audio_pipeline_handle_t recorder, player;
@@ -90,41 +72,17 @@ static void gpio_task_example(void *arg)
 
 static esp_err_t recorder_pipeline_open()
 {
-    // audio_element_handle_t i2s_stream_reader;
     audio_pipeline_cfg_t pipeline_cfg = DEFAULT_AUDIO_PIPELINE_CONFIG();
     recorder = audio_pipeline_init(&pipeline_cfg);
     AUDIO_NULL_CHECK(TAG, recorder, return ESP_FAIL);
 
-    /*
-    i2s_stream_cfg_t i2s_cfg = I2S_STREAM_CFG_DEFAULT();
-    i2s_cfg.type = AUDIO_STREAM_READER;
-    i2s_cfg.uninstall_drv = false;
-#if defined CONFIG_ESP_LYRAT_MINI_V1_1_BOARD
-    i2s_cfg.i2s_port = 1;
-    i2s_cfg.task_core = 1;
-#endif
-    i2s_cfg.i2s_config.sample_rate = I2S_SAMPLE_RATE;
-    i2s_stream_reader = i2s_stream_init(&i2s_cfg);
-    */
-
     audio_element_handle_t a_stream = analog_stream_init();
 
-#if defined CONFIG_ESP_LYRAT_MINI_V1_1_BOARD
-    algorithm_stream_cfg_t algo_config = ALGORITHM_STREAM_CFG_DEFAULT();
-    algo_config.input_type = ALGORITHM_STREAM_INPUT_TYPE1;
-    algo_config.task_core = 1;
-    audio_element_handle_t element_algo = algo_stream_init(&algo_config);
-#endif
-
     rsp_filter_cfg_t rsp_cfg = DEFAULT_RESAMPLE_FILTER_CONFIG();
-    rsp_cfg.src_rate = I2S_SAMPLE_RATE;
-#if defined CONFIG_ESP_LYRAT_MINI_V1_1_BOARD
+    rsp_cfg.src_rate = 16000;
     rsp_cfg.src_ch = 1;
-#else
-    rsp_cfg.src_ch = I2S_CHANNELS;
-#endif
-    rsp_cfg.dest_rate = CODEC_SAMPLE_RATE;
-    rsp_cfg.dest_ch = CODEC_CHANNELS;
+    rsp_cfg.dest_rate = 8000;
+    rsp_cfg.dest_ch = 1;
     rsp_cfg.complexity = 5;
     rsp_cfg.task_core = 1;
     audio_element_handle_t filter = rsp_filter_init(&rsp_cfg);
@@ -139,22 +97,13 @@ static esp_err_t recorder_pipeline_open()
     raw_read = raw_stream_init(&raw_cfg);
     audio_element_set_output_timeout(raw_read, portMAX_DELAY);
 
-    // audio_pipeline_register(recorder, i2s_stream_reader, "i2s");
-
     audio_pipeline_register(recorder, a_stream, "as");
     audio_pipeline_register(recorder, filter, "filter");
     audio_pipeline_register(recorder, sip_encoder, "sip_enc");
     audio_pipeline_register(recorder, raw_read, "raw");
 
-#if defined CONFIG_ESP_LYRAT_MINI_V1_1_BOARD
-    audio_pipeline_register(recorder, element_algo, "algo");
-    algo_stream_set_record_rate(element_algo, I2S_CHANNELS, I2S_SAMPLE_RATE);
-    const char *link_tag[5] = {"i2s", "algo", "filter", "sip_enc", "raw"};
-    audio_pipeline_link(recorder, &link_tag[0], 5);
-#else
     const char *link_tag[4] = {"as", "filter", "sip_enc", "raw"};
     audio_pipeline_link(recorder, &link_tag[0], 4);
-#endif
 
     audio_pipeline_run(recorder);
     ESP_LOGI(TAG, " SIP recorder has been created");
@@ -177,9 +126,8 @@ static esp_err_t player_pipeline_open()
     audio_element_handle_t sip_decoder = g711_decoder_init(&g711_cfg);
 
     rsp_filter_cfg_t rsp_cfg = DEFAULT_RESAMPLE_FILTER_CONFIG();
-    rsp_cfg.src_rate = CODEC_SAMPLE_RATE;
+    rsp_cfg.src_rate = 8000;
     rsp_cfg.src_ch = 1;
-    // rsp_cfg.dest_rate = I2S_SAMPLE_RATE;
     rsp_cfg.dest_rate = 8000;
     rsp_cfg.dest_ch = 1;
     rsp_cfg.complexity = 5;
@@ -267,63 +215,6 @@ static int _sip_event_handler(sip_event_msg_t *event)
     return 0;
 }
 
-static esp_err_t input_key_service_cb(periph_service_handle_t handle, periph_service_event_t *evt, void *ctx)
-{
-    audio_board_handle_t board_handle = (audio_board_handle_t)ctx;
-    int player_volume;
-    audio_hal_get_volume(board_handle->audio_hal, &player_volume);
-    if (evt->type == INPUT_KEY_SERVICE_ACTION_CLICK_RELEASE) {
-        ESP_LOGD(TAG, "[ * ] input key id is %d", (int)evt->data);
-        sip_state_t sip_state = esp_sip_get_state(sip);
-        if (sip_state < SIP_STATE_REGISTERED) {
-            return ESP_OK;
-        }
-        switch ((int)evt->data) {
-            case INPUT_KEY_USER_ID_REC:
-            case INPUT_KEY_USER_ID_PLAY:
-                ESP_LOGI(TAG, "[ * ] [Play] input key event");
-                if (sip_state & SIP_STATE_RINGING) {
-                    esp_sip_uas_answer(sip, true);
-                }
-                if (sip_state & SIP_STATE_REGISTERED) {
-                    esp_sip_uac_invite(sip, "101");
-                }
-                break;
-            case INPUT_KEY_USER_ID_MODE:
-            case INPUT_KEY_USER_ID_SET:
-                ESP_LOGI(TAG, "[ * ] [Set] input key event");
-                if (sip_state & SIP_STATE_RINGING) {
-                    esp_sip_uas_answer(sip, false);
-                } else if (sip_state & SIP_STATE_ON_CALL) {
-                    esp_sip_uac_bye(sip);
-                } else if ((sip_state & SIP_STATE_CALLING) || (sip_state & SIP_STATE_SESS_PROGRESS)) {
-                    esp_sip_uac_cancel(sip);
-                }
-                break;
-            case INPUT_KEY_USER_ID_VOLUP:
-                ESP_LOGD(TAG, "[ * ] [Vol+] input key event");
-                player_volume += 10;
-                if (player_volume > 100) {
-                    player_volume = 100;
-                }
-                audio_hal_set_volume(board_handle->audio_hal, player_volume);
-                ESP_LOGI(TAG, "[ * ] Volume set to %d %%", player_volume);
-                break;
-            case INPUT_KEY_USER_ID_VOLDOWN:
-                ESP_LOGD(TAG, "[ * ] [Vol-] input key event");
-                player_volume -= 10;
-                if (player_volume < 0) {
-                    player_volume = 0;
-                }
-                audio_hal_set_volume(board_handle->audio_hal, player_volume);
-                ESP_LOGI(TAG, "[ * ] Volume set to %d %%", player_volume);
-                break;
-        }
-    }
-
-    return ESP_OK;
-}
-
 void app_main()
 {
     const char *WIFI_SSID = "test";
@@ -353,7 +244,6 @@ void app_main()
     esp_periph_set_handle_t set = esp_periph_set_init(&periph_cfg);
 
     ESP_LOGI(TAG, "[1.1] Initialize and start peripherals");
-    // audio_board_key_init(set);
 
     gpio_set_direction(2, GPIO_MODE_OUTPUT);
     adc1_config_width(ADC_WIDTH_BIT_12);
@@ -368,17 +258,6 @@ void app_main()
     esp_periph_start(set, wifi_handle);
     periph_wifi_wait_for_connected(wifi_handle, portMAX_DELAY);
 
-    // ESP_LOGI(TAG, "[ 2 ] Start codec chip");
-    // audio_board_handle_t board_handle = audio_board_init();
-    // audio_hal_ctrl_codec(board_handle->audio_hal, AUDIO_HAL_CODEC_MODE_BOTH, AUDIO_HAL_CTRL_START);
-    //
-    // ESP_LOGI(TAG, "[ 3 ] Create and start input key service");
-    // input_key_service_info_t input_key_info[] = INPUT_KEY_DEFAULT_INFO();
-    // input_key_service_cfg_t input_cfg = INPUT_KEY_SERVICE_DEFAULT_CONFIG();
-    // input_cfg.handle = set;
-    // periph_service_handle_t input_ser = input_key_service_create(&input_cfg);
-    // input_key_service_add_key(input_ser, input_key_info, INPUT_KEY_NUM);
-    // periph_service_set_callback(input_ser, input_key_service_cb, (void *)board_handle);
 
     ESP_LOGI(TAG, "[ 4 ] Create SIP Service");
     sip_config_t sip_cfg = {
