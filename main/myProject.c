@@ -64,6 +64,30 @@ static sip_handle_t sip;
 static audio_element_handle_t raw_read, raw_write;
 static audio_pipeline_handle_t recorder, player;
 
+static xQueueHandle gpio_evt_queue = NULL;
+
+static void call()
+{
+    ESP_LOGI(TAG, "handler");
+    esp_sip_uac_invite(sip, "200");
+}
+
+static void IRAM_ATTR gpio_isr_handler(void *arg)
+{
+    uint32_t gpio_num = (uint32_t)arg;
+    xQueueSendFromISR(gpio_evt_queue, &gpio_num, NULL);
+}
+
+static void gpio_task_example(void *arg)
+{
+    uint32_t io_num;
+    for (;;) {
+        if (xQueueReceive(gpio_evt_queue, &io_num, portMAX_DELAY)) {
+            call();
+        }
+    }
+}
+
 static esp_err_t recorder_pipeline_open()
 {
     // audio_element_handle_t i2s_stream_reader;
@@ -149,20 +173,24 @@ static esp_err_t player_pipeline_open()
     raw_write = raw_stream_init(&raw_cfg);
 
     g711_decoder_cfg_t g711_cfg = DEFAULT_G711_DECODER_CONFIG();
+    g711_cfg.dec_mode = 1;
     audio_element_handle_t sip_decoder = g711_decoder_init(&g711_cfg);
 
     rsp_filter_cfg_t rsp_cfg = DEFAULT_RESAMPLE_FILTER_CONFIG();
     rsp_cfg.src_rate = CODEC_SAMPLE_RATE;
-    rsp_cfg.src_ch = CODEC_CHANNELS;
-    rsp_cfg.dest_rate = I2S_SAMPLE_RATE;
-    rsp_cfg.dest_ch = I2S_CHANNELS;
+    rsp_cfg.src_ch = 1;
+    // rsp_cfg.dest_rate = I2S_SAMPLE_RATE;
+    rsp_cfg.dest_rate = 8000;
+    rsp_cfg.dest_ch = 1;
     rsp_cfg.complexity = 5;
     audio_element_handle_t filter = rsp_filter_init(&rsp_cfg);
 
     i2s_stream_cfg_t i2s_cfg = I2S_STREAM_INTERNAL_DAC_CFG_DEFAULT();
     i2s_cfg.type = AUDIO_STREAM_WRITER;
     i2s_cfg.uninstall_drv = false;
-    i2s_cfg.i2s_config.sample_rate = I2S_SAMPLE_RATE;
+    i2s_cfg.i2s_config.channel_format = I2S_CHANNEL_FMT_ONLY_LEFT;
+    i2s_cfg.i2s_config.sample_rate = 8000;
+    i2s_cfg.i2s_config.communication_format = I2S_COMM_FORMAT_I2S;
     i2s_stream_writer = i2s_stream_init(&i2s_cfg);
 
     audio_pipeline_register(player, raw_write, "raw");
@@ -216,14 +244,14 @@ static int _sip_event_handler(sip_event_msg_t *event)
             break;
         case SIP_EVENT_AUDIO_SESSION_BEGIN:
             ESP_LOGI(TAG, "SIP_EVENT_AUDIO_SESSION_BEGIN");
-            // player_pipeline_open();
+            player_pipeline_open();
             recorder_pipeline_open();
             break;
         case SIP_EVENT_AUDIO_SESSION_END:
             ESP_LOGI(TAG, "SIP_EVENT_AUDIO_SESSION_END");
-            // audio_pipeline_stop(player);
-            // audio_pipeline_wait_for_stop(player);
-            // audio_pipeline_deinit(player);
+            audio_pipeline_stop(player);
+            audio_pipeline_wait_for_stop(player);
+            audio_pipeline_deinit(player);
             audio_pipeline_stop(recorder);
             audio_pipeline_wait_for_stop(recorder);
             audio_pipeline_deinit(recorder);
@@ -231,7 +259,7 @@ static int _sip_event_handler(sip_event_msg_t *event)
         case SIP_EVENT_READ_AUDIO_DATA:
             return raw_stream_read(raw_read, (char *)event->data, event->data_len);
         case SIP_EVENT_WRITE_AUDIO_DATA:
-            // return raw_stream_write(raw_write, (char *)event->data, event->data_len);
+            return raw_stream_write(raw_write, (char *)event->data, event->data_len);
         case SIP_EVENT_READ_DTMF:
             ESP_LOGI(TAG, "SIP_EVENT_READ_DTMF ID : %d ", ((char *)event->data)[0]);
             break;
@@ -365,14 +393,14 @@ void app_main()
     };
     sip = esp_sip_init(&sip_cfg);
     esp_sip_start(sip);
-    while (true) {
-        sip_state_t sip_state = esp_sip_get_state(sip);
 
-        if (!(sip_state < SIP_STATE_REGISTERED)) {
-            if (sip_state & SIP_STATE_RINGING) {
-                esp_sip_uas_answer(sip, true);
-                break;
-            }
-        }
-    }
+    gpio_set_direction(GPIO_NUM_12, GPIO_MODE_INPUT);
+    gpio_intr_enable(GPIO_NUM_12);
+    gpio_set_intr_type(GPIO_NUM_12, GPIO_INTR_POSEDGE);
+
+    gpio_install_isr_service(0);
+    gpio_isr_handler_add(GPIO_NUM_12, gpio_isr_handler, (void *)GPIO_NUM_12);
+
+    gpio_evt_queue = xQueueCreate(10, sizeof(uint32_t));
+    xTaskCreate(gpio_task_example, "gpio_task_example", 2048, NULL, 10, NULL);
 }
