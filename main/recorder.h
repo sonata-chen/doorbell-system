@@ -35,6 +35,7 @@ typedef struct recorder {
 // xQueueHandle timer_queue;
 
 Recorder *newRecorder(uint32_t samplerate, adc_channel_t channel, adc_bits_width_t width, int timer_idx);
+void destructRecorder(Recorder *t);
 
 /*
  * A simple helper function to print the raw timer counter value

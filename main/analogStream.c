@@ -114,7 +114,7 @@ static esp_err_t _a_destroy(audio_element_handle_t self)
     Recorder *r = audio_element_getdata(self);
 
     timer_deinit(TIMER_GROUP_0, r->timer_idx);
-    free(r);
+    destructRecorder(r);
     return ESP_OK;
 }
 

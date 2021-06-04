@@ -1,6 +1,7 @@
 #include "esp_log.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
+#include "audio_mem.h"
 
 /**/
 #include "recorder.h"
@@ -10,7 +11,7 @@ static void recorder_timer_init(Recorder *r, bool auto_reload, double timer_inte
 
 Recorder *newRecorder(uint32_t samplerate, adc_channel_t channel, adc_bits_width_t width, int timer_idx)
 {
-    Recorder *r = malloc(sizeof(Recorder));
+    Recorder *r = audio_calloc(1, sizeof(Recorder));
 
     r->samplerate = samplerate;
     r->channel = channel;
@@ -22,6 +23,12 @@ Recorder *newRecorder(uint32_t samplerate, adc_channel_t channel, adc_bits_width
     recorder_timer_init(r, true, 1.0 / samplerate);
 
     return r;
+}
+
+void destructRecorder(Recorder *r)
+{
+    vQueueDelete(r->sample_queue);
+    audio_free(r);
 }
 
 /*
@@ -51,7 +58,7 @@ static void IRAM_ATTR timer_group0_isr(void *para)
 
     // read digital value from microphone
     int32_t adc_reading = 0;
-    adc_reading = adc1_get_raw((adc1_channel_t) (r->channel));
+    adc_reading = adc1_get_raw((adc1_channel_t)(r->channel));
     evt.sample = adc_reading;
 
     /* Clear the interrupt
@@ -80,9 +87,9 @@ static void IRAM_ATTR timer_group0_isr(void *para)
 
     if (ret != pdTRUE)
         // ESP_LOGI("RECORDER", "lost");
-        gpio_set_level(2,1);
+        gpio_set_level(2, 1);
     else
-        gpio_set_level(2,0);
+        gpio_set_level(2, 0);
 
     timer_spinlock_give(TIMER_GROUP_0);
 }
