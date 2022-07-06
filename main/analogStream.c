@@ -98,6 +98,7 @@ static int _a_read(audio_element_handle_t self, char *buffer, int len, TickType_
             ret = xQueueReceive(r->sample_queue, &evt, portMAX_DELAY);
         }
 
+        // convert adc value to 16 bits audio sample
         int width = r->width + 9;
         int16_t sample_16_bits = evt.sample * (1 << (16 - width)) - (1 << (16 - 1));
         int8_t higher_byte = sample_16_bits >> 8;

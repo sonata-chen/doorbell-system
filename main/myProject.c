@@ -40,13 +40,23 @@
 #include "tcpip_adapter.h"
 #endif
 
-static const char *TAG = "VOIP_EXAMPLE";
+static const char *TAG = "VOIP_EXAMPLE";  // Logging message
 
-static sip_handle_t sip;
-static audio_element_handle_t raw_read, raw_write;
-static audio_pipeline_handle_t recorder, player;
+static sip_handle_t sip;  // SIP 服務
+static audio_element_handle_t raw_read, raw_write; // Raw Stream
+static audio_pipeline_handle_t recorder, player;   // Audio Pipeline
 
-static xQueueHandle gpio_evt_queue = NULL;
+/* 
+ *  Button Event handle
+ *
+ *  當實體按鈕被按下時，會觸發 gpio 中斷，被觸發的腳位的號碼會被加入
+ *  queue 中，因此有多個按鈕時可以知道是哪個按鈕被按下，但目前我們只有
+ *  一個按鈕。
+ *
+ *  gpio_task() 負責處理 gpio 中斷，它會呼叫 call() 函式來撥打網路電話。
+ */
+
+static xQueueHandle gpio_evt_queue = NULL; // queue
 
 static void call()
 {
@@ -56,13 +66,13 @@ static void call()
 
 static void IRAM_ATTR gpio_isr_handler(void *arg)
 {
-    uint32_t gpio_num = (uint32_t)arg;
+    uint32_t gpio_num = (uint32_t)arg;  // 腳位號碼
     xQueueSendFromISR(gpio_evt_queue, &gpio_num, NULL);
 }
 
-static void gpio_task_example(void *arg)
+static void gpio_task(void *arg)
 {
-    uint32_t io_num;
+    uint32_t io_num;  // 腳位號碼
     for (;;) {
         if (xQueueReceive(gpio_evt_queue, &io_num, portMAX_DELAY)) {
             call();
@@ -70,6 +80,7 @@ static void gpio_task_example(void *arg)
     }
 }
 
+/* Create audio pipeline for recorder */
 static esp_err_t recorder_pipeline_open()
 {
     audio_pipeline_cfg_t pipeline_cfg = DEFAULT_AUDIO_PIPELINE_CONFIG();
@@ -89,7 +100,7 @@ static esp_err_t recorder_pipeline_open()
 
     g711_encoder_cfg_t g711_cfg = DEFAULT_G711_ENCODER_CONFIG();
     g711_cfg.task_core = 1;
-    g711_cfg.enc_mode = 1;
+    g711_cfg.enc_mode = 1; /* 0: a-law  1: u-law */
     audio_element_handle_t sip_encoder = g711_encoder_init(&g711_cfg);
 
     raw_stream_cfg_t raw_cfg = RAW_STREAM_CFG_DEFAULT();
@@ -110,6 +121,7 @@ static esp_err_t recorder_pipeline_open()
     return ESP_OK;
 }
 
+/* Create audio pipeline for player */
 static esp_err_t player_pipeline_open()
 {
     audio_element_handle_t i2s_stream_writer;
@@ -122,7 +134,7 @@ static esp_err_t player_pipeline_open()
     raw_write = raw_stream_init(&raw_cfg);
 
     g711_decoder_cfg_t g711_cfg = DEFAULT_G711_DECODER_CONFIG();
-    g711_cfg.dec_mode = 1;
+    g711_cfg.dec_mode = 1; /* 0: a-law  1: u-law */
     audio_element_handle_t sip_decoder = g711_decoder_init(&g711_cfg);
 
     rsp_filter_cfg_t rsp_cfg = DEFAULT_RESAMPLE_FILTER_CONFIG();
@@ -245,7 +257,10 @@ void app_main()
 
     ESP_LOGI(TAG, "[1.1] Initialize and start peripherals");
 
+    /*  on board led */
     gpio_set_direction(2, GPIO_MODE_OUTPUT);
+
+    /* 設置 adc1 channel 5，用於讀取麥克風的輸出 */
     adc1_config_width(ADC_WIDTH_BIT_12);
     adc1_config_channel_atten(ADC1_CHANNEL_5, ADC_ATTEN_DB_6);
 
@@ -259,27 +274,27 @@ void app_main()
     periph_wifi_wait_for_connected(wifi_handle, portMAX_DELAY);
 
 
-    ESP_LOGI(TAG, "[ 4 ] Create SIP Service");
+    ESP_LOGI(TAG, "[ 2 ] Create SIP Service");
     sip_config_t sip_cfg = {
         .uri = SIP_URI,
         .event_handler = _sip_event_handler,
         .send_options = true,
-#ifdef CONFIG_SIP_CODEC_G711A
-        .acodec_type = SIP_ACODEC_G711A,
-#else
-        .acodec_type = SIP_ACODEC_G711U,
-#endif
+        .acodec_type = SIP_ACODEC_G711U, // or SIP_ACODEC_G711A
     };
+
+    /* 啟動 SIP 服務 */
     sip = esp_sip_init(&sip_cfg);
     esp_sip_start(sip);
 
+    ESP_LOGI(TAG, "[ 3 ] Add ISR handler for GPIO pin");
     gpio_set_direction(GPIO_NUM_12, GPIO_MODE_INPUT);
-    gpio_intr_enable(GPIO_NUM_12);
-    gpio_set_intr_type(GPIO_NUM_12, GPIO_INTR_POSEDGE);
+    gpio_intr_enable(GPIO_NUM_12); // 啟用 gpio 中斷
+    gpio_set_intr_type(GPIO_NUM_12, GPIO_INTR_POSEDGE); // 正緣觸發
 
+    /* 註冊 gpio interupt handler */
     gpio_install_isr_service(0);
     gpio_isr_handler_add(GPIO_NUM_12, gpio_isr_handler, (void *)GPIO_NUM_12);
 
-    gpio_evt_queue = xQueueCreate(10, sizeof(uint32_t));
-    xTaskCreate(gpio_task_example, "gpio_task_example", 2048, NULL, 10, NULL);
+    gpio_evt_queue = xQueueCreate(10, sizeof(uint32_t)); // Create a queue
+    xTaskCreate(gpio_task, "gpio_task_example", 2048, NULL, 10, NULL); // Start a task
 }
