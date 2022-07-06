@@ -41,27 +41,7 @@ audio_element_handle_t analog_stream_init()
     cfg.tag = "as";
     cfg.buffer_len = A_STREAM_BUF_SIZE;
 
-    // i2s_stream_t *i2s = audio_calloc(1, sizeof(i2s_stream_t));
-    // AUDIO_MEM_CHECK(TAG, i2s, return NULL);
-    // memcpy(&i2s->config, config, sizeof(i2s_stream_cfg_t));
-
-    // i2s->type = config->type;
-    // i2s->use_alc = config->use_alc;
-    // i2s->volume = config->volume;
-    // i2s->uninstall_drv = config->uninstall_drv;
-
-    // if (config->type == AUDIO_STREAM_READER) {
-    //     cfg.read = _i2s_read;
-    // } else if (config->type == AUDIO_STREAM_WRITER) {
-    //     cfg.write = _i2s_write;
-    // }
-
     cfg.read = _a_read;
-
-    // if (i2s_driver_install(i2s->config.i2s_port, &i2s->config.i2s_config, 0, NULL) != ESP_OK) {
-    //     audio_free(i2s);
-    //     return NULL;
-    // }
 
     el = audio_element_init(&cfg);
     AUDIO_MEM_CHECK(TAG, el, {
